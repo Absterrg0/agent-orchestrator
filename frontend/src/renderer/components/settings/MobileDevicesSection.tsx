@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Bell, Loader2, Smartphone, Trash2 } from "lucide-react";
 import { apiClient, apiErrorCode, apiErrorMessage } from "../../lib/api-client";
+import { cn } from "../../lib/utils";
 import { Switch } from "../ui/switch";
 
 export const mobileDevicesQueryKey = ["mobile-devices"] as const;
@@ -67,7 +68,22 @@ export function MobileDevicesSection() {
 			});
 			if (error) throw new Error(apiErrorMessage(error));
 		},
-		onSuccess: invalidate,
+		onMutate: async ({ installId, muted }) => {
+			await queryClient.cancelQueries({ queryKey: mobileDevicesQueryKey });
+			const previous = queryClient.getQueryData<MobileDevice[]>(mobileDevicesQueryKey);
+			if (previous) {
+				queryClient.setQueryData<MobileDevice[]>(mobileDevicesQueryKey, (old) =>
+					(old ?? previous).map((d) => (d.installId === installId ? { ...d, muted } : d)),
+				);
+			}
+			return { previous };
+		},
+		onError: (_err, _vars, context) => {
+			if (context?.previous) {
+				queryClient.setQueryData(mobileDevicesQueryKey, context.previous);
+			}
+		},
+		onSettled: invalidate,
 	});
 
 	const remove = useMutation({
@@ -130,25 +146,35 @@ export function MobileDevicesSection() {
 					<ul className="mt-2 divide-y divide-[var(--color-border-settings-input)]">
 						{sortedDevices.map((device) => {
 							const name = device.deviceName || t("mobile.devices.unnamed");
+							const mutingThis = mute.isPending && mute.variables?.installId === device.installId;
 							return (
 								<li
 									key={device.installId}
 									className="flex min-h-12 items-center gap-3 py-2.5"
 								>
-									<Smartphone className="size-4 shrink-0 text-settings-muted" aria-hidden="true" />
+									<Smartphone className="size-4 shrink-0 self-start pt-1 text-settings-muted" aria-hidden="true" />
 									<div className="min-w-0 flex-1">
 										<div className="truncate text-sm">{name}</div>
+										{!device.notificationsEnabled && (
+											<p className="mt-0.5 text-caption leading-(--leading-settings-mobile-hint) text-settings-muted">
+												{t("mobile.devices.enableInAppHint")}
+											</p>
+										)}
 									</div>
 
 									<div className="flex items-center gap-2" title={t("mobile.devices.notificationsFor", { name })}>
 										<Bell className="size-4 text-settings-muted" aria-hidden="true" data-testid="bell" />
 										<Switch
-											checked={device.notificationsEnabled && !device.muted}
-											disabled={mute.isPending || !device.notificationsEnabled}
+											checked={!device.muted}
+											disabled={mutingThis}
 											aria-label={t("mobile.devices.notificationsFor", { name })}
 											onCheckedChange={(next) =>
 												mute.mutate({ installId: device.installId, muted: !next })
 											}
+											className={cn(
+												"data-[state=unchecked]:bg-[var(--color-border-settings-input)]",
+												"**:data-[slot=switch-thumb]:bg-white",
+											)}
 										/>
 									</div>
 
